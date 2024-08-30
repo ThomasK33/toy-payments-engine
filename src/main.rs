@@ -2,17 +2,20 @@
 
 use std::{env, io};
 
-mod ledger;
+use anyhow::anyhow;
+
+mod account;
 mod structs;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> anyhow::Result<()> {
     let mut args = env::args();
     if args.len() != 2 {
-        eprint!("Incorrect amount of arguments passed. Please only pass the transaction csv file path as first argument.");
-        return Ok(());
+        return Err(anyhow!(
+            "Expected exactly one argument: the path to the transaction csv file."
+        ));
     }
 
-    let file_path = args.next_back().expect("Missing csv file path");
+    let file_path = args.next_back().expect("No arguments provided");
 
     let mut reader = csv::ReaderBuilder::new()
         .trim(csv::Trim::All)
@@ -20,43 +23,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .has_headers(true)
         .from_path(file_path)?;
 
-    let mut account_ledger = ledger::Tracker::new();
+    let mut account_ledger = account::Ledger::new();
 
-    for record in reader.deserialize::<structs::Record>() {
-        let record = match record {
+    for result in reader.deserialize::<structs::Record>() {
+        let record = match result {
             Ok(r) => r,
             Err(err) => {
-                eprintln!("Failed to process the record because of: {err}");
+                eprintln!("Failed to deserialize record: {err}");
                 continue;
             }
         };
         if let Err(err) = record.validate() {
-            eprintln!("Failed to verify the record: {err}");
+            eprintln!("Failed to validate the record: {err}");
             continue;
         }
 
+        let account = account_ledger.get_or_insert_customer(record.client);
+
         let outcome = match record.record_type {
-            structs::RecordType::Deposit => account_ledger
-                .get_or_create_customer(record.client)
-                .deposit(record.tx, record.amount.unwrap()),
-            structs::RecordType::Withdrawal => account_ledger
-                .get_or_create_customer(record.client)
-                .withdraw(record.tx, record.amount.unwrap()),
-            structs::RecordType::Dispute => account_ledger
-                .get_or_create_customer(record.client)
-                .dispute(record.tx),
-            structs::RecordType::Resolve => account_ledger
-                .get_or_create_customer(record.client)
-                .resolve(record.tx),
-            structs::RecordType::Chargeback => account_ledger
-                .get_or_create_customer(record.client)
-                .chargeback(record.tx),
+            structs::RecordType::Deposit => {
+                let amount = record.amount.ok_or(anyhow!("Missing amount for deposit"))?;
+                account.deposit(record.tx, amount)
+            }
+            structs::RecordType::Withdrawal => {
+                let amount = record
+                    .amount
+                    .ok_or(anyhow!("Missing amount for withdrawal"))?;
+                account.withdraw(record.tx, amount)
+            }
+            structs::RecordType::Dispute => account.dispute(record.tx),
+            structs::RecordType::Resolve => account.resolve(record.tx),
+            structs::RecordType::Chargeback => account.chargeback(record.tx),
         };
 
         if let Err(err) = outcome {
             eprintln!(
-                "Failed to perform {} on account {}: {err}",
-                record.record_type, record.client
+                "Failed to perform {} operation with transaction {} on account {}: {}",
+                record.record_type, record.tx, record.client, err
             );
         };
     }
@@ -66,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .flexible(true)
         .from_writer(io::stdout());
 
-    for account in account_ledger.printable_accounts() {
+    for account in account_ledger.client_records() {
         writer.serialize(account)?;
     }
 

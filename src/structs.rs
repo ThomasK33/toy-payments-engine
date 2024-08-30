@@ -12,26 +12,20 @@ pub struct Record {
 
     pub client: u16,
     pub tx: u32,
-    pub amount: Option<f64>,
+    pub amount: Option<f32>,
 }
 
 impl Record {
     pub fn validate(&self) -> anyhow::Result<()> {
-        if let (RecordType::Deposit | RecordType::Withdrawal, None) =
-            (&self.record_type, self.amount)
-        {
-            return Err(anyhow!("Missing amount in record"));
-        };
-
-        if let (RecordType::Chargeback | RecordType::Resolve | RecordType::Dispute, Some(_)) =
-            (&self.record_type, self.amount)
-        {
-            return Err(anyhow!(
-                "Chargeback / Resolve / Dispute record may not contain amount"
-            ));
-        };
-
-        Ok(())
+        match (&self.record_type, self.amount) {
+            (RecordType::Deposit | RecordType::Withdrawal, None) => {
+                Err(anyhow!("Missing amount in record"))
+            }
+            (RecordType::Chargeback | RecordType::Resolve | RecordType::Dispute, Some(_)) => Err(
+                anyhow!("Chargeback / Resolve / Dispute records may not contain an amount"),
+            ),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -47,15 +41,13 @@ pub enum RecordType {
 
 impl Display for RecordType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            RecordType::Deposit => "deposit",
-            RecordType::Withdrawal => "withdrawal",
-            RecordType::Dispute => "dispute",
-            RecordType::Resolve => "resolve",
-            RecordType::Chargeback => "chargeback",
-        };
-
-        write!(f, "{name}")
+        match self {
+            RecordType::Deposit => write!(f, "deposit"),
+            RecordType::Withdrawal => write!(f, "withdrawal"),
+            RecordType::Dispute => write!(f, "dispute"),
+            RecordType::Resolve => write!(f, "resolve"),
+            RecordType::Chargeback => write!(f, "chargeback"),
+        }
     }
 }
 
@@ -64,9 +56,9 @@ impl Display for RecordType {
 #[derive(Debug, Serialize)]
 pub struct ClientRecord {
     pub client: u16,
-    pub available: f64,
-    pub held: f64,
-    pub total: f64,
+    pub available: f32,
+    pub held: f32,
+    pub total: f32,
     pub locked: bool,
 }
 
